@@ -27,19 +27,24 @@ using namespace std;
 typedef pair<int,int> pii;
 
 struct Info {
-  int units;
+  int units, opp_units;
   int t, e, d;
 };
 struct ScoreRet {
-  // TODO: Need a copy ctor.
-  ScoreRet(pii scores_arg) : scores {scores_arg}, li {} {}
+  ScoreRet(const ScoreRet& o) : scores {o.scores}, li {o.li} {}
+  ScoreRet(pii scores_arg = pii(-1,-1), list<Info> li_arg = list<Info> {}) : scores {scores_arg}, li {li_arg} {}
+  ScoreRet& operator=(const ScoreRet& o) {
+    this->scores = o.scores;
+    this->li = o.li;
+    return *this;
+  }
   pii scores;
   list<Info> li;
   //tuple<int,int,int> id;
 };
 // Struct used as hash key for ScoreRet
 struct ScoreRetId {
-  ScoreRetId(int t_arg, int e_arg, int d_arg) : t{t_arg}, e{e_arg}, d{d_arg}/*t{get<0>(id)}, e{get<1>(id)}, d{get<2>(id)}*/ {}
+  ScoreRetId(int t_arg, int e_arg, int d_arg) : t{t_arg}, e{e_arg}, d{d_arg} {}
   int t, e, d;
 };
 
@@ -69,7 +74,7 @@ int bound[100];
 pii score[100][2000][10];
 
 // This unordered map is intended to parallel score[][][]; it's used for caching.
-using srmap_type = unordered_map<ScoreRetId, shared_ptr<ScoreRet>, ScoreRetIdHash, ScoreRetIdEq>;
+using srmap_type = unordered_map<ScoreRetId, ScoreRet, ScoreRetIdHash, ScoreRetIdEq>;
 srmap_type smap {1000, ScoreRetIdHash{}, ScoreRetIdEq{}};
 
 // Compares 2 pairs representing scores, returning true if the first is better than the second.
@@ -79,13 +84,13 @@ bool better(pii &S1, pii &S2) {
   return S1.first > S2.first;
 }
 
-shared_ptr<ScoreRet> Score(int t, int e, int d)
+ScoreRet Score(int t, int e, int d)
 {
   // t==0 is 90th minute, but due to the recursive, depth-first nature of the returns from Score, we're essentially
   // working backwards from the end, so there's never any score at minute 90.
   if (!t) {
     // Create a ScoreRet with an empty list.
-    return shared_ptr<ScoreRet> {new ScoreRet {pii(0,0)}};
+    return ScoreRet {pii(0,0), list<Info> {}};
   }
   if (t == 45) d = 0;
   assert(0 <= e && e <= 1800);
@@ -96,22 +101,22 @@ shared_ptr<ScoreRet> Score(int t, int e, int d)
   // Also check cache for appropriate ScoreRet
   // TODO: Refactor... Keep in mind that they'll hit or miss together...
   // Assumption: If we don't find it in cache, we'll cache it in loop below.
-  shared_ptr<ScoreRet> psr_r {};
-  auto psr_it = smap.find(ScoreRetId(t,e,d+4));
-  if (psr_it != smap.end()) {
+  auto sr_it = smap.find(ScoreRetId(t,e,d+4));
+  if (sr_it != smap.end()) {
     if (r.first < 0) cout << "Oops! r not cached!" << endl << flush;
     // TODO: Need to clone new instance...
     // Iterator refers to a k,v pair: v is a weak_ptr<ScoreRet>. Convert to shared_ptr for return.
     // No! Can't use weak_ptr.
-    //cout << "Cache hit! Returning psr_it->second.lock()!" << endl << flush;
-    //if (psr_it->second.expired()) cout << "weak_ptr expired!!!!" << endl << flush;
-    //psr_r = psr_it->second.lock();
-    psr_r = shared_ptr<ScoreRet> {new ScoreRet {*psr_it->second}};
-    if (&(psr_r->li) == &(psr_it->second->li)) cout << "Oops! Thought we'd copied." << endl << flush;
-    //cout << "psr_it->second" << endl << flush;
-    //cout << psr_r->scores.first << psr_r->scores.second << psr_r->li.size() << endl << flush;
-    cout << "Pulled from cache: t=" << t << "\t e=" << e << "\t d=" << d << "\t len=" << psr_r->li.size() << "\t @" << &(psr_r->li) << endl << flush;
-    return psr_r;
+    //cout << "Cache hit! Returning sr_it->second.lock()!" << endl << flush;
+    //if (sr_it->second.expired()) cout << "weak_ptr expired!!!!" << endl << flush;
+    //sr_r = sr_it->second.lock();
+    // Copy it.
+    ScoreRet sr_r {sr_it->second};
+    if (&(sr_r.li) == &(sr_it->second.li)) cout << "Oops! Thought we'd copied." << endl << flush;
+    //cout << "sr_it->second" << endl << flush;
+    //cout << sr_r->scores.first << sr_r->scores.second << sr_r->li.size() << endl << flush;
+    //cout << "Pulled from cache: t=" << t << "\t e=" << e << "\t d=" << d << "\t len=" << sr_r.li.size() << "\t @" << &(sr_r.li) << endl << flush;
+    return sr_r;
   }
   if (r.first >= 0) cout << "Oops! r cached but not sp!" << endl << flush;
   // Do we have a score for this permutation yet?
@@ -119,6 +124,7 @@ shared_ptr<ScoreRet> Score(int t, int e, int d)
   // cheer units could be expended in different ways such that units remaining at a given point in time are still equal.
   // Thus, this test is a form of result caching.
   int i_r = -1; // -1 indicates no trip into loop: i.e., cache hit...
+  ScoreRet sr_r {};
   if (r.first < 0) {
     //cout << "Cache miss: " << t << " " << e << " " << d << endl << flush;
     // This loop tries every allotment of cheer units possible for current time; i represents units for current try.
@@ -130,7 +136,6 @@ shared_ptr<ScoreRet> Score(int t, int e, int d)
       cout << "Not recursing: t=" << t << " e=" << e << " d=" << d << endl;
     }
     for (int i = 0; i <= min(e, n); ++i) {
-      //cout << "Trying t=" << t << " e-i=" << e-i << " d=" << d << " i=" << i << endl << flush;
       // When dd reaches 5, we score; when dd reaches -5, they score.
       // Note: When a team wins consecutive minutes, dd incs/decs continuously by 1; when a new team wins, however, dd
       // jumps to -1 or 1, nullifying up to 4 wins of the team that had been winning.
@@ -142,43 +147,28 @@ shared_ptr<ScoreRet> Score(int t, int e, int d)
       // returned score if a goal would be scored in this minute.
       // The dd % 5 resets the counter after a goal
       //cout << "Calling Score..." << endl << flush;
-      auto psr = Score(t-1, e-i, dd % 5);
-      //cout << "Got Score..." << endl << flush;
-      if (!psr) cout << "Oops! Null sp!!!!!!!" << endl << flush;
-      //cout << "psr->scores: " << psr->scores.first << " - " << psr->scores.second << endl << flush;
-      pii next = psr->scores;
-      //cout << "Assigned next pair." << endl << flush;
+      auto sr = Score(t-1, e-i, dd % 5);
+      pii next = sr.scores;
       // Counter's been effectively reset after score, but update the pairs to reflect any goal scored.
       next.first += dd == 5;
       next.second += dd == -5;
-      //cout << "Calling better..." << endl << flush;
       if (!i || better(next, r)) {
         r = next;
         // Extra stuff...
         i_r = i;
-        psr_r = psr;
+        sr_r = sr;
       }
     }
-    // Need to add weak_ptr to map.
-    // Assumption: psr_r is 1 of the values returned by recursive calls to Score in loop above.
+    // Assumption: sr_r is one the values returned by recursive calls to Score in loop above.
     // Rationale: We'll always get into the loop because of the <= 0 test.
-    //cout << "Updating smap..." << endl << flush;
-    cout << "Putting in cache: t=" << t << "\t e=" << e << "\t d=" << d << "\t len=" << psr_r->li.size() << "\t @" << &(psr_r->li) << endl << flush;
-    smap[ScoreRetId(t,e,d+4)] = psr_r;
-    //cout << "Updated smap..." << endl << flush;
-    // Update the ScoreRet to reflect best outcome for this level.
-    if (i_r >= 0) {
-      psr_r->scores = r;
-      //cout << "Pushing " << i_r << "onto vector..." << endl << flush;
-      psr_r->li.push_front(Info {i_r, t, e, d});
-      //cout << "Pushed " << i_r << "onto vector..." << endl << flush;
-    }
-  } else {
-    //cout << "Cache hit: " << t << " " << e << " " << d << endl << flush;
+    // Update the ScoreRet to reflect best outcome for this level, then cache.
+    sr_r.scores = r;
+    sr_r.li.push_front(Info {i_r, bound[t], t, e, d});
+    // Note: std::make_pair doesn't work because I don't have rvalue references... Could probably use std::move()
+    smap.insert(pair<ScoreRetId, ScoreRet>(ScoreRetId(t,e,d+4), sr_r));
   }
   // Return the pair representing best possible outcome for this t.
-  //cout << "@t=" << t << " score: " << r.first << " - " << r.second << endl;
-  return psr_r;
+  return sr_r;
 }
 
 int main(void) {
@@ -195,13 +185,14 @@ int main(void) {
     for (int x = a; x < b; ++x)
       ++bound[90-x];
   }
-  shared_ptr<ScoreRet> spr = Score(90, n*t, 0);
+  ScoreRet sr = Score(90, n*t, 0);
 
-  int idx = 0;
-  for (auto it = spr->li.begin(); it != spr->li.end(); ++it, idx++) {
-    cout << "idx=" << idx << "\t t=" << it->t << "\t e=" << it->e << "\t d=" << it->d << "\t " << it->units << endl;
+  int idx = 1;
+  for (auto it = sr.li.begin(); it != sr.li.end(); ++it, idx++) {
+    cout << "minute=" << idx << "\t t=" << it->t << "\t e=" << it->e << "\t d=" << it->d << "\t " << it->units << "\t " << it->opp_units << endl;
   }
-  //printf("%d %d\n", r.first, r.second);
+  cout << "-- Final Score --" << endl;
+  printf("%d %d\n", sr.scores.first, sr.scores.second);
   return 0;
 }
 
