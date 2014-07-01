@@ -86,8 +86,8 @@ bool better(pii &S1, pii &S2) {
 
 ScoreRet Score(int t, int e, int d)
 {
-  // t==0 is 90th minute, but due to the recursive, depth-first nature of the returns from Score, we're essentially
-  // working backwards from the end, so there's never any score at minute 90.
+  // t==0 is end of 90th minute, but due to the recursive, depth-first nature of the returns from Score, we're
+  // essentially working backwards from the end, so there's never any score at t==0.
   if (!t) {
     // Create a ScoreRet with an empty list.
     return ScoreRet {pii(0,0), list<Info> {}};
@@ -98,47 +98,30 @@ ScoreRet Score(int t, int e, int d)
   // Initilize score (from cache) before loop that looks for better outcomes: value of -1 means nothing in cache.
   // Shift input d (-4<=d<=4) to center at 4, thereby avoiding negative indices.
   pii &r = score[t][e][d+4];
-  // Also check cache for appropriate ScoreRet
-  // TODO: Refactor... Keep in mind that they'll hit or miss together...
-  // Assumption: If we don't find it in cache, we'll cache it in loop below.
+  // Also check cache for appropriate ScoreRet, bearing in mind that the 2 caches should hit or miss together...
+  // Explanation: There are many ways to arrive at a given t with a specific combination of t, e and d, and since those
+  // 3 parameters completely determine the result of the recursion, caching the result can save a lot of time.
   auto sr_it = smap.find(ScoreRetId(t,e,d+4));
   if (sr_it != smap.end()) {
-    if (r.first < 0) cout << "Oops! r not cached!" << endl << flush;
-    // TODO: Need to clone new instance...
-    // Iterator refers to a k,v pair: v is a weak_ptr<ScoreRet>. Convert to shared_ptr for return.
-    // No! Can't use weak_ptr.
-    //cout << "Cache hit! Returning sr_it->second.lock()!" << endl << flush;
-    //if (sr_it->second.expired()) cout << "weak_ptr expired!!!!" << endl << flush;
-    //sr_r = sr_it->second.lock();
-    // Copy it.
+    // Make sure the 2 caches are in sync.
+    assert(r.first >= 0);
     ScoreRet sr_r {sr_it->second};
-    if (&(sr_r.li) == &(sr_it->second.li)) cout << "Oops! Thought we'd copied." << endl << flush;
-    //cout << "sr_it->second" << endl << flush;
-    //cout << sr_r->scores.first << sr_r->scores.second << sr_r->li.size() << endl << flush;
-    //cout << "Pulled from cache: t=" << t << "\t e=" << e << "\t d=" << d << "\t len=" << sr_r.li.size() << "\t @" << &(sr_r.li) << endl << flush;
     return sr_r;
   }
-  if (r.first >= 0) cout << "Oops! r cached but not sp!" << endl << flush;
-  // Do we have a score for this permutation yet?
-  // Explanation: Due to the recursive nature of the calls to Score, the permutations are not unique: consider that
-  // cheer units could be expended in different ways such that units remaining at a given point in time are still equal.
-  // Thus, this test is a form of result caching.
-  int i_r = -1; // -1 indicates no trip into loop: i.e., cache hit...
+  // If we get here, nothing in cache. We don't have a score for this permutation yet.
+  int i_r = -1;
   ScoreRet sr_r {};
-  if (r.first < 0) {
-    //cout << "Cache miss: " << t << " " << e << " " << d << endl << flush;
+  // Note: This cache test is no longer necessary because of the earlier test on the smap cache.
+  //if (r.first < 0) {
     // This loop tries every allotment of cheer units possible for current time; i represents units for current try.
     // For each try, we call Score recursively for the subsequent minute, saving return in next for comparison with
     // current best outcome, updating current best if appropriate.
     // e is cheer units remaining; n is # of cheerleaders.
-    // Explanation: A single cheerleader can't use more than one of his cheer units per minute.
-    if (min(e, n) < 0) {
-      cout << "Not recursing: t=" << t << " e=" << e << " d=" << d << endl;
-    }
+    // Constraint: A single cheerleader can't use more than one of his cheer units per minute: hence, the min(e, n)
     for (int i = 0; i <= min(e, n); ++i) {
       // When dd reaches 5, we score; when dd reaches -5, they score.
-      // Note: When a team wins consecutive minutes, dd incs/decs continuously by 1; when a new team wins, however, dd
-      // jumps to -1 or 1, nullifying up to 4 wins of the team that had been winning.
+      // Note: When a team wins consecutive minutes, dd incs/decs continuously by 1; when a new team wins a minute,
+      // however, dd jumps to -1 or 1, nullifying up to 4 wins of the team that had been winning.
       int dd = 0;
       if (i < bound[t]) dd = min(d, 0)-1;
       if (i > bound[t]) dd = max(d, 0)+1;
@@ -146,16 +129,16 @@ ScoreRet Score(int t, int e, int d)
       // each try, cheer units allotted for this minute and all earlier minutes has been fixed. We then update the
       // returned score if a goal would be scored in this minute.
       // The dd % 5 resets the counter after a goal
-      //cout << "Calling Score..." << endl << flush;
       auto sr = Score(t-1, e-i, dd % 5);
       pii next = sr.scores;
-      // Counter's been effectively reset after score, but update the pairs to reflect any goal scored.
+      // If there was a score this minute, the modulo 5 in the Score argument has effectively reset the count; need to
+      // update the pairs as well.
       next.first += dd == 5;
       next.second += dd == -5;
+      // Is this the current best?
       if (!i || better(next, r)) {
         r = next;
-        // Extra stuff...
-        i_r = i;
+        i_r = i;   // # of cheer units used
         sr_r = sr;
       }
     }
@@ -166,7 +149,7 @@ ScoreRet Score(int t, int e, int d)
     sr_r.li.push_front(Info {i_r, bound[t], t, e, d});
     // Note: std::make_pair doesn't work because I don't have rvalue references... Could probably use std::move()
     smap.insert(pair<ScoreRetId, ScoreRet>(ScoreRetId(t,e,d+4), sr_r));
-  }
+  //}
   // Return the pair representing best possible outcome for this t.
   return sr_r;
 }
